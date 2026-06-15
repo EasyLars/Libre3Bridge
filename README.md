@@ -4,6 +4,7 @@ An iOS proof-of-concept for reading FreeStyle Libre 3 glucose sensors directly v
 
 **Authors:** Lars & Lars  
 **Based on:** [Juggluco](https://www.juggluco.nl/) by Jaap Korthals Altes  
+and [DiaBLE](https://github.com/gui-dos/DiaBLE) by gui-dos  
 **License:** GPL-3.0 (see below)
 
 ---
@@ -171,3 +172,5 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ```
 
 This project is based on Juggluco, Copyright (C) 2021 Jaap Korthals Altes, also licensed under GPL-3.0.
+
+This project also builds on [DiaBLE](https://github.com/gui-dos/DiaBLE), Copyright gui-dos, licensed under MIT.
