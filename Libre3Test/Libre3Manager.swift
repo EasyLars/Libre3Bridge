@@ -1,29 +1,63 @@
-// Libre3Manager.swift
-// CBCentralManager + CBPeripheralDelegate
-// Handshake-Flow identisch zu Juggluco's Libre3GattCallback.java:
-// - State machine läuft über didWriteValueFor (wie Android's onCharacteristicWrite)
-// - Daten werden in 20-Byte-Chunks übertragen (2B Offset + 18B Payload)
-// - Sensor-Daten werden via sequence-numbered notifications empfangen
+/*  Libre3Manager.swift
+ *  Part of Libre3Bridge – FreeStyle Libre 3 direct BLE connection for iOS
+ *
+ *  Copyright (C) 2024 Lars Oeljeschläger & Lars
+ *
+ *  Based on Juggluco by Jaap Korthals Altes (GPL-3.0)
+ *  <https://github.com/maheitsec/juggluco>
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Core Bluetooth layer that drives the Libre 3 security handshake.
+ *
+ *  The handshake state machine is driven by write-acknowledge callbacks
+ *  (didWriteValueFor), mirroring Juggluco's Libre3GattCallback.java which is
+ *  driven by onCharacteristicWrite.
+ *
+ *  Data transfer uses 20-byte GATT packets: 2-byte little-endian offset ‖ 18-byte payload.
+ *  Incoming notifications are sequence-numbered (1-byte seq ‖ N-byte payload) and
+ *  reassembled before being processed.
+ *
+ *  When the sensor rejects a nonce-back (disconnects without sending the 67-byte challenge),
+ *  the manager automatically cycles to the next KDF × nonce variant and reconnects.
+ */
 
 import CoreBluetooth
 import Combine
 import Foundation
 
-// MARK: - BLE Zustand
+// MARK: - Connection State
 
+/// Observable BLE connection state.
 enum ConnectionState: String {
-    case idle          = "Bereit"
-    case scanning      = "Suche Sensor…"
-    case connecting    = "Verbinde…"
-    case discovering   = "Dienste erkunden…"
-    case handshake     = "Handshake läuft…"
-    case authenticated = "Authentifiziert ✓"
-    case readingData   = "Lese Daten…"
-    case failed        = "Fehler"
+    case idle          = "Ready"
+    case scanning      = "Scanning…"
+    case connecting    = "Connecting…"
+    case discovering   = "Discovering services…"
+    case handshake     = "Handshake in progress…"
+    case authenticated = "Authenticated"
+    case readingData   = "Reading data…"
+    case failed        = "Error"
 }
 
 // MARK: - Libre3Manager
 
+/// Manages the BLE connection and security handshake with a FreeStyle Libre 3 sensor.
+///
+/// Create one instance (e.g. as a `@StateObject`) and call ``startScan()`` to begin.
+/// The manager publishes ``state``, ``log``, ``kdfResults``, and ``glucoseReading``.
 @MainActor
 class Libre3Manager: NSObject, ObservableObject {
 
@@ -34,9 +68,11 @@ class Libre3Manager: NSObject, ObservableObject {
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
+
+    /// Crypto engine instance — accessible from the UI to display the active KDF variant.
     let crypto = Libre3Crypto()
 
-    // Characteristics
+    // Discovered characteristics
     private var cmdResponse: CBCharacteristic?
     private var challengeData: CBCharacteristic?
     private var certData: CBCharacteristic?
@@ -45,24 +81,24 @@ class Libre3Manager: NSObject, ObservableObject {
     private var historic: CBCharacteristic?
     private var clinical: CBCharacteristic?
 
-    // Juggluco-style commandphase (driven by write callbacks)
+    // Handshake phase counter driven by write-acknowledge callbacks
     private var commandPhase = 0
     private var notificationsReady = 0
     private var subscriptionStarted = false
 
-    // Write chunking (20-byte packets: 2B offset + 18B payload)
+    // Outgoing data chunking state (20-byte GATT packets)
     private var wrtData: [UInt8]?
     private var wrtOffset = 0
 
-    // Incoming data assembly (sequence-numbered chunks)
+    // Incoming data reassembly state
     private var rdtData = [UInt8](repeating: 0, count: 512)
     private var rdtLength = 0
     private var rdtBytes = 0
-    private var rxPayloadLen = 19      // Payload-Größe, gelernt aus Paket 1
+    private var rxPayloadLen = 19
     private var receivedSeqs: Set<Int> = []
     private var totalPackets = 0
 
-    // Timing
+    // Timing for logging
     private var scanStart: Date?
     private var connectStart: Date?
     private var handshakeStart: Date?
@@ -74,17 +110,41 @@ class Libre3Manager: NSObject, ObservableObject {
 
     // MARK: - Public API
 
+    /// Starts a new scan-connect-handshake cycle.
+    ///
+    /// Resets the crypto session, clears previous results, and begins scanning for
+    /// the Libre 3 GATT service UUIDs.  When the sensor disconnects without completing
+    /// the handshake, the manager automatically cycles to the next KDF variant and
+    /// calls this method internally.
     func startScan() {
         log.append("══════════════════════════════════")
         kdfResults.removeAll()
         glucoseReading = nil
         crypto.resetEphemeral()
         crypto.nonceBackVariant = KDFVariant.allCases[0]
-        crypto.nonceVariant = NonceVariant.allCases[0]
+        crypto.nonceVariant = .raw7
         startScanInternal()
     }
 
+    /// Stops scanning and disconnects the current peripheral.
+    func stopScan() {
+        central.stopScan()
+        if let p = peripheral { central.cancelPeripheralConnection(p) }
+        state = .idle
+        add("Disconnected by user")
+    }
+
+    /// Appends a timestamped message to ``log`` and prints it to the console.
+    func add(_ msg: String) {
+        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        log.append("[\(ts)] \(msg)")
+        print(msg)
+    }
+
+    // MARK: - Internal Helpers
+
     private func startScanInternal() {
+        crypto.resetEphemeral()
         commandPhase = 0
         notificationsReady = 0
         subscriptionStarted = false
@@ -92,35 +152,19 @@ class Libre3Manager: NSObject, ObservableObject {
         scanStart = Date()
         connectStart = nil
         handshakeStart = nil
-
         guard central.state == .poweredOn else {
-            add("⚠️ Bluetooth nicht eingeschaltet")
+            add("Bluetooth not powered on")
             state = .idle
             return
         }
         state = .scanning
-        add("🔍 \(crypto.nonceBackVariant.rawValue) | \(crypto.nonceVariant.rawValue)")
+        add("Trying: \(crypto.nonceBackVariant.rawValue) | \(crypto.nonceVariant.rawValue)")
         central.scanForPeripherals(
             withServices: [CBUUID(string: Libre3Keys.serviceData),
                            CBUUID(string: Libre3Keys.serviceSecurity)],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
     }
-
-    func stopScan() {
-        central.stopScan()
-        if let p = peripheral { central.cancelPeripheralConnection(p) }
-        state = .idle
-        add("⏹ Getrennt")
-    }
-
-    func add(_ msg: String) {
-        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        log.append("[\(ts)] \(msg)")
-        print(msg)
-    }
-
-    // MARK: - Timing Helper
 
     private func elapsed(since start: Date?) -> String {
         guard let s = start else { return "?" }
@@ -131,12 +175,13 @@ class Libre3Manager: NSObject, ObservableObject {
 
     private func sendRawCommand(_ byte: UInt8) {
         guard let char = cmdResponse, let p = peripheral else { return }
-        add("→ CMD: 0x\(String(format:"%02X", byte))")
+        if byte == 0x08 || byte == 0x11 { add("→ CMD: 0x\(String(format:"%02X", byte))") }
         p.writeValue(Data([byte]), for: char, type: .withResponse)
     }
 
-    // MARK: - Write Chunking (20-byte format: 2B little-endian offset + 18B payload)
+    // MARK: - Write Chunking
 
+    // Sends the next 18-byte payload chunk to gattCharCertificateData.
     private func writeNextCertChunk() {
         guard let data = wrtData, let char = certData, let p = peripheral else { return }
         let remaining = data.count - wrtOffset
@@ -150,6 +195,7 @@ class Libre3Manager: NSObject, ObservableObject {
         p.writeValue(Data(packet), for: char, type: .withResponse)
     }
 
+    // Sends the next 18-byte payload chunk to gattCharChallengeData.
     private func writeNextChallengeChunk() {
         guard let data = wrtData, let char = challengeData, let p = peripheral else { return }
         let remaining = data.count - wrtOffset
@@ -163,145 +209,127 @@ class Libre3Manager: NSObject, ObservableObject {
         p.writeValue(Data(packet), for: char, type: .withResponse)
     }
 
-    // MARK: - Incoming Data Assembly (offset-based, tolerant gegenüber Lücken und Duplikaten)
+    // MARK: - Incoming Data Reassembly
 
-    // Returns bytes remaining (≤0 = complete)
+    // Accumulates sequence-numbered notification chunks; returns bytes still missing (0 = complete).
     private func getsecdata(_ value: [UInt8]) -> Int {
         guard value.count >= 2 else { return rdtLength }
         let seq = Int(value[0] & 0xFF)
         let payload = Array(value.dropFirst())
-
         if receivedSeqs.contains(seq) { return totalPackets > 0 ? totalPackets - receivedSeqs.count : 1 }
         receivedSeqs.insert(seq)
-
         if rxPayloadLen == 0 {
             rxPayloadLen = payload.count
             totalPackets = Int(ceil(Double(rdtLength) / Double(max(rxPayloadLen, 1))))
         }
-
         let pos = seq * rxPayloadLen
         let copyLen = min(payload.count, max(0, rdtData.count - pos))
         if pos >= 0 && copyLen > 0 {
             for i in 0..<copyLen { rdtData[pos + i] = payload[i] }
         }
-
         rdtBytes = receivedSeqs.reduce(0) { acc, s in
             acc + min(rxPayloadLen, max(0, rdtLength - s * rxPayloadLen))
         }
-
         if totalPackets > 0 && receivedSeqs.count >= totalPackets { return 0 }
         return rdtLength - rdtBytes
     }
 
-    // MARK: - Handshake Start
+    // MARK: - Handshake State Machine
 
     private func startHandshake() {
         commandPhase = 1
         state = .handshake
         handshakeStart = Date()
-        add("🔐 Handshake — \(crypto.nonceBackVariant.rawValue)")
         sendRawCommand(0x01)
     }
 
-    // MARK: - preparedata (Juggluco equivalent)
-    // Called when cmdResponse notification arrives — signals incoming data or state changes
-
+    // Handles cmdResponse notifications: incoming length/type signals from the sensor.
     private func preparedata(_ value: [UInt8]) {
         let sig = Int(value[0] & 0xFF)
-
         if value.count == 1 {
             if sig == 4 { sendRawCommand(0x09) }
-            else { add("⚠️ preparedata sig=0x\(String(format:"%02X",sig)) unbekannt") }
+            else { add("preparedata sig=0x\(String(format:"%02X",sig)) unknown") }
             return
         }
-
         let len = Int(value[1] & 0xFF)
         rdtLength = len
         rdtData = [UInt8](repeating: 0, count: max(len, 512))
         rdtBytes = 0; receivedSeqs = []; rxPayloadLen = 0; totalPackets = 0
-
-        switch sig {
-        case 8:  add("← Challenge bereit (\(len)B)")
-        case 10: add("← Sensor-Cert kommt (\(len)B)…")
-        case 15: add("← Sensor-Ephemeral kommt (\(len)B)…")
-        default: add("⚠️ preparedata sig=\(sig) len=\(len)")
+        if sig != 8 && sig != 10 && sig != 15 {
+            add("preparedata sig=\(sig) len=\(len)")
         }
     }
 
-    // MARK: - Received assembled cert/ephemeral data
-
+    // Called when gattCharCertificateData is fully reassembled.
     private func receivedCertData() {
         let payload = Data(rdtData.prefix(rdtLength))
         switch rdtLength {
         case 140:
             if crypto.processSensorCertificate(payload) {
-                add("✅ Sensor-Cert OK → KeyAgreement")
                 commandPhase = 4
                 sendRawCommand(0x0D)
             } else {
-                add("❌ Sensor-Cert ungültig"); state = .failed
+                add("Sensor cert invalid"); state = .failed
             }
         case 65:
             if crypto.processSensorEphemeral(payload) {
-                add("✅ Sensor-Ephemeral OK → AuthorizeSymmetric")
                 sendRawCommand(0x11)
             } else {
-                add("❌ Sensor-Ephemeral ungültig"); state = .failed
+                add("Sensor ephemeral key invalid"); state = .failed
             }
         default:
-            add("⚠️ Unbekannte Länge: \(rdtLength)B")
+            add("Unexpected cert data length: \(rdtLength) bytes")
         }
     }
 
-    // MARK: - Challenge Data (23B oder 67B)
-
+    // Called when gattCharChallengeData is fully reassembled (23 or 67 bytes).
     private func receivedChallengeData() {
         let payload = Data(rdtData.prefix(rdtLength))
         add("← Challenge (\(rdtLength)B): \(hexShort([UInt8](payload)))")
 
         switch rdtLength {
         case 23:
-            add("📋 23-Byte Challenge — Variante: \(crypto.nonceBackVariant.rawValue)")
             if let result = crypto.processChallenge23(payload) {
-                add("🔑 kInit = \(result.kInitHex)")
-                add("→ Nonce-Back senden (\(result.nonceBack.count)B)")
+                add("kInit: \(result.kInitHex)")
                 wrtData = [UInt8](result.nonceBack)
                 wrtOffset = 0
                 writeNextChallengeChunk()
             } else {
-                add("❌ Konnte Nonce-Back nicht berechnen")
+                add("Failed to build nonce-back")
             }
 
         case 67:
-            add("🔑 67-Byte Challenge — teste \(KDFVariant.allCases.count) KDF-Varianten…")
+            let total = KDFVariant.allCases.count * NonceVariant.allCases.count
+            add("67-byte challenge — testing \(total) combinations…")
             let results = crypto.processChallenge67(payload)
             kdfResults = results
-            for r in results {
-                let kInitHex = hexShort([UInt8](r.kInit))
-                if let dec = r.decrypted {
-                    let kEncHex = hexShort([UInt8](dec.subdata(in: 32..<48)))
-                    let ivHex   = hexShort([UInt8](dec.subdata(in: 48..<56)))
-                    add("✅ \(r.variant.rawValue)\n   kInit:\(kInitHex)\n   kEnc:\(kEncHex) ivEnc:\(ivHex)\n   r2:\(r.r2Matches ? "✅":"❌") r1:\(r.r1Matches ? "✅":"❌")")
-                    if r.r2Matches && r.r1Matches {
-                        crypto.activateSession(with: r)
-                        state = .authenticated
-                        add("🎉 HANDSHAKE ERFOLGREICH mit \(r.variant.rawValue)!")
-                        enableDataNotifications()
-                    }
-                } else {
-                    add("❌ \(r.variant.rawValue): Tag-Mismatch (kInit:\(kInitHex))")
+            let hits    = results.filter { $0.r2Matches && $0.r1Matches }
+            let tagOKs  = results.filter { $0.tagOK && !($0.r2Matches && $0.r1Matches) }
+            let missCnt = results.filter { !$0.tagOK }.count
+            add("Tag OK: \(results.filter{$0.tagOK}.count) | r1+r2 match: \(hits.count) | Tag fail: \(missCnt)")
+            for r in tagOKs {
+                add("Tag-OK (no r1/r2 match): \(r.label)  raw:\(hexShort([UInt8](r.rawDecrypted)))")
+            }
+            for r in hits {
+                let dec = r.decrypted!
+                let kEncHex = hexShort([UInt8](dec.subdata(in: 32..<48)))
+                let ivHex   = hexShort([UInt8](dec.subdata(in: 48..<56)))
+                add("MATCH: \(r.label)\n   kInit:\(hexShort([UInt8](r.kInit)))\n   kEnc:\(kEncHex) ivEnc:\(ivHex)")
+                if state != .authenticated {
+                    crypto.activateSession(with: r)
+                    state = .authenticated
+                    add("HANDSHAKE COMPLETE")
+                    enableDataNotifications()
                 }
             }
-            if !results.contains(where: { $0.r2Matches && $0.r1Matches }) {
-                add("⚠️ Keine KDF korrekt. RAW: \(hex([UInt8](payload)))")
+            if hits.isEmpty {
+                add("No match. Raw 67B: \(hex([UInt8](payload)))")
             }
 
         default:
-            add("⚠️ Unbekannte Challenge-Länge: \(rdtLength)")
+            add("Unexpected challenge length: \(rdtLength) bytes")
         }
     }
-
-    // MARK: - Data Notifications aktivieren (nach Handshake)
 
     private func enableDataNotifications() {
         guard let p = peripheral else { return }
@@ -315,16 +343,16 @@ class Libre3Manager: NSObject, ObservableObject {
 
     private func receivedOneMinuteReading(_ data: Data) {
         guard let raw = crypto.decryptPacket(kind: 3, data: data) else {
-            add("❌ Glucose: Entschlüsselung fehlgeschlagen")
+            add("Glucose decrypt failed")
             return
         }
         if let reading = parseOneMinuteReading(data: raw, activationTime: 0) {
             glucoseReading = reading
-            add("🩸 Glucose: \(reading.glucoseMgDl) mg/dL \(reading.trendArrow)")
+            add("Glucose: \(reading.glucoseMgDl) mg/dL \(reading.trendArrow)")
         }
     }
 
-    // MARK: - Helfer
+    // MARK: - Formatting
 
     func hexShort(_ bytes: [UInt8]) -> String {
         let h = bytes.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
@@ -342,19 +370,19 @@ extension Libre3Manager: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Task { @MainActor in
             switch central.state {
-            case .poweredOn:  add("📶 Bluetooth eingeschaltet")
-            case .poweredOff: add("📴 Bluetooth ausgeschaltet")
-            default: add("⚠️ BT Status: \(central.state.rawValue)")
+            case .poweredOn:  add("Bluetooth powered on")
+            case .poweredOff: add("Bluetooth powered off")
+            default:          add("Bluetooth state: \(central.state.rawValue)")
             }
         }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
-                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+                                    advertisementData: [String: Any], rssi RSSI: NSNumber) {
         Task { @MainActor in
             guard self.peripheral == nil else { return }
             let name = peripheral.name ?? peripheral.identifier.uuidString.prefix(8).description
-            add("📡 Sensor gefunden: \(name) (RSSI: \(RSSI), Scan dauerte \(elapsed(since: scanStart)))")
+            add("Sensor found: \(name)  RSSI:\(RSSI)  scan:\(elapsed(since: scanStart))")
             connectStart = Date()
             central.stopScan()
             self.peripheral = peripheral
@@ -365,7 +393,6 @@ extension Libre3Manager: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
-            add("🔗 Verbunden mit: \(peripheral.name ?? "Sensor") (Connect dauerte \(elapsed(since: connectStart)))")
             state = .discovering
             peripheral.delegate = self
             peripheral.discoverServices([
@@ -375,33 +402,32 @@ extension Libre3Manager: CBCentralManagerDelegate {
         }
     }
 
-    nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         Task { @MainActor in
-            let dur = handshakeStart != nil ? " (Handshake lief \(elapsed(since: handshakeStart)))"
-                    : connectStart  != nil ? " (nach Connect \(elapsed(since: connectStart)))" : ""
-            add("🔌 Getrennt\(dur)\(error != nil ? ": \(error!.localizedDescription)" : "")")
-            // Nächste KDF-Variante für den nächsten Versuch
+            let dur = handshakeStart != nil ? " (handshake ran \(elapsed(since: handshakeStart)))"
+                    : connectStart  != nil ? " (after connect \(elapsed(since: connectStart)))" : ""
+            add("Disconnected\(dur)\(error != nil ? ": \(error!.localizedDescription)" : "")")
+
             if state != .authenticated {
+                // Cycle to the next KDF variant and auto-reconnect
                 let kdfs = KDFVariant.allCases
                 let nonces = NonceVariant.allCases
                 if let kIdx = kdfs.firstIndex(of: crypto.nonceBackVariant) {
                     let nextKIdx = (kIdx + 1) % kdfs.count
                     if nextKIdx == 0 {
-                        // Alle KDF-Varianten durch → Nonce-Variante wechseln
                         let nIdx = nonces.firstIndex(of: crypto.nonceVariant) ?? 0
                         crypto.nonceVariant = nonces[(nIdx + 1) % nonces.count]
                     }
                     crypto.nonceBackVariant = kdfs[nextKIdx]
-                    add("🔄 \(crypto.nonceBackVariant.rawValue) | \(crypto.nonceVariant.rawValue)")
+                    add("Next: \(crypto.nonceBackVariant.rawValue) | \(crypto.nonceVariant.rawValue)")
                 }
             }
-            commandPhase = 0
-            notificationsReady = 0
-            subscriptionStarted = false
+
+            commandPhase = 0; notificationsReady = 0; subscriptionStarted = false
             self.peripheral = nil
 
             if state != .authenticated {
-                // Auto-Reconnect: nächste Variante nach kurzer Pause
                 state = .scanning
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 startScanInternal()
@@ -417,14 +443,15 @@ extension Libre3Manager: CBCentralManagerDelegate {
 extension Libre3Manager: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         Task { @MainActor in
-            guard error == nil else { add("❌ Services: \(error!.localizedDescription)"); return }
+            guard error == nil else { add("Service discovery error: \(error!.localizedDescription)"); return }
             for service in peripheral.services ?? [] {
                 peripheral.discoverCharacteristics(nil, for: service)
             }
         }
     }
 
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         Task { @MainActor in
             guard error == nil else { return }
             for char in service.characteristics ?? [] {
@@ -439,10 +466,8 @@ extension Libre3Manager: CBPeripheralDelegate {
                 default: break
                 }
             }
-
             if cmdResponse != nil && challengeData != nil && certData != nil && !subscriptionStarted {
                 subscriptionStarted = true
-                add("✅ Security-Characteristics gefunden — aktiviere Notifications…")
                 [cmdResponse, challengeData, certData].compactMap { $0 }.forEach {
                     peripheral.setNotifyValue(true, for: $0)
                 }
@@ -450,55 +475,51 @@ extension Libre3Manager: CBPeripheralDelegate {
         }
     }
 
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                                error: Error?) {
         Task { @MainActor in
             if let err = error {
-                add("⚠️ Notification \(characteristic.uuid.uuidString.prefix(8)): \(err.localizedDescription)")
+                add("Notification error \(characteristic.uuid.uuidString.prefix(8)): \(err.localizedDescription)")
                 return
             }
-            let securityUUIDs = [Libre3Keys.charCommandResponse, Libre3Keys.charChallengeData, Libre3Keys.charCertificateData]
-                .map { $0.uppercased() }
-            if securityUUIDs.contains(characteristic.uuid.uuidString.uppercased()) && characteristic.isNotifying {
+            let secUUIDs = [Libre3Keys.charCommandResponse, Libre3Keys.charChallengeData,
+                            Libre3Keys.charCertificateData].map { $0.uppercased() }
+            if secUUIDs.contains(characteristic.uuid.uuidString.uppercased()) && characteristic.isNotifying {
                 notificationsReady += 1
-                add("🔔 Notification aktiv (\(notificationsReady)/3): \(characteristic.uuid.uuidString.prefix(8))")
                 if notificationsReady == 3 {
-                    add("⏱ Notifications bereit nach \(elapsed(since: connectStart))")
+                    add("All notifications ready (\(elapsed(since: connectStart)))")
                     startHandshake()
                 }
             }
         }
     }
 
-    // MARK: - Write Callbacks (treiben den Handshake-Flow)
+    // MARK: - Write Callbacks (drive the handshake state machine)
 
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         Task { @MainActor in
             if let err = error {
-                add("❌ Write \(characteristic.uuid.uuidString.prefix(8)): \(err.localizedDescription)")
+                add("Write error \(characteristic.uuid.uuidString.prefix(8)): \(err.localizedDescription)")
                 return
             }
-
             let uuid = characteristic.uuid.uuidString.uppercased()
-
             switch uuid {
 
-            // CMD-Response Write-Callback → Handshake State Machine
             case Libre3Keys.charCommandResponse.uppercased():
                 switch commandPhase {
-                case 1:
-                    commandPhase = 2; sendRawCommand(0x02)
+                case 1: commandPhase = 2; sendRawCommand(0x02)
                 case 2:
                     commandPhase = 3
                     wrtData = crypto.appCertificate; wrtOffset = 0
                     writeNextCertChunk()
-                case 3:
-                    break
+                case 3: break
                 case 4:
                     commandPhase = 5
                     wrtData = crypto.appEphemeralPubKeyBytes; wrtOffset = 0
                     writeNextCertChunk()
-                case 5:
-                    break
+                case 5: break
                 default: break
                 }
 
@@ -517,7 +538,6 @@ extension Libre3Manager: CBPeripheralDelegate {
                     writeNextChallengeChunk()
                 } else {
                     wrtData = nil
-                    add("→ ChallengeLoadDone (0x08)")
                     sendRawCommand(0x08)
                 }
 
@@ -528,40 +548,30 @@ extension Libre3Manager: CBPeripheralDelegate {
 
     // MARK: - Notification Callbacks
 
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        // WICHTIG: characteristic.value sofort capturen (synchron), bevor iOS es für das
-        // nächste Paket überschreibt. Erst DANN zum MainActor dispatchen.
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        // Capture value synchronously before iOS overwrites the buffer for the next packet.
         guard error == nil, let value = characteristic.value, !value.isEmpty else { return }
         let bytes = [UInt8](value)
         let uuid = characteristic.uuid.uuidString.uppercased()
         Task { @MainActor [bytes, uuid] in
-
             switch uuid {
-
-            // CMD Response Notification → preparedata (Ereignis-Signal vom Sensor)
             case Libre3Keys.charCommandResponse.uppercased():
                 preparedata(bytes)
-
-            // Cert Data Notification → Sensor-Cert oder Sensor-Ephemeral empfangen
             case Libre3Keys.charCertificateData.uppercased():
                 if getsecdata(bytes) <= 0 {
                     receivedCertData()
                     rdtBytes = 0; receivedSeqs = []; totalPackets = 0
                 }
-
-            // Challenge Data Notification → 23B oder 67B Challenge
             case Libre3Keys.charChallengeData.uppercased():
                 if getsecdata(bytes) <= 0 {
                     receivedChallengeData()
                     rdtBytes = 0; receivedSeqs = []; totalPackets = 0
                 }
-
             case Libre3Keys.charOneMinuteReading.uppercased():
                 receivedOneMinuteReading(value)
-
             case Libre3Keys.charPatchStatus.uppercased():
                 add("← patchStatus (\(bytes.count)B): \(hex(bytes))")
-
             default:
                 add("← \(uuid.prefix(8)): \(hex(bytes).prefix(48))")
             }

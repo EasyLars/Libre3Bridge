@@ -1,12 +1,44 @@
-// Libre3Keys.swift
-// Alle bekannten Zertifikate und Schlüssel (aus Juggluco ECDHCrypto.java + DiaBLE)
+/*  Libre3Keys.swift
+ *  Part of Libre3Bridge – FreeStyle Libre 3 direct BLE connection for iOS
+ *
+ *  Copyright (C) 2024 Lars Oeljeschläger & Lars
+ *
+ *  Based on Juggluco by Jaap Korthals Altes (GPL-3.0)
+ *  <https://github.com/maheitsec/juggluco>
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Static constants extracted from Juggluco (ECDHCrypto.java):
+ *  app certificates, app static private key candidate, patch signing keys,
+ *  GATT service/characteristic UUIDs, and packet descriptors for AES-CCM
+ *  nonce construction.
+ */
 
 import Foundation
 
 enum Libre3Keys {
 
-    // App-Zertifikat Level 0 (identisch in Juggluco Android + DiaBLE iOS, 140 Bytes)
-    // Enthält App Static Public Key bei Offset 33..97
+    // MARK: - App Certificates
+    //
+    // Sent to the sensor during handshake phase 2 (via gattCharCertificateData).
+    // Contains a 33-byte header followed by an uncompressed P-256 public key (65 bytes)
+    // and a 64-byte signature.  Level 0 is used by older sensors; level 1 by current ones.
+    //
+    // Source: Juggluco ECDHCrypto.java LIBRE3_APP_CERTIFICATES_B
+
+    /// App certificate for security level 0 (140 bytes).
     static let appCertLevel0: [UInt8] = [
         0x03,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,
         0x0f,0x10,0x00,0x01,0x5f,0x14,0x9f,0xe1,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -22,8 +54,7 @@ enum Libre3Keys {
         0x4c,0x21,0x0c,0x18,0x86,0x5a,0x8f,0xf4,0x5a,0xdc,0x37,0x27,0xf4,0x8b,0x53,0xa7
     ]
 
-    // App-Zertifikat Level 1 — Juggluco LIBRE3_APP_CERTIFICATES_B[1] (162 Bytes)
-    // Zugehöriger privater Schlüssel: appStaticPrivKeyLevel1
+    /// App certificate for security level 1 (162 bytes).
     static let appCertLevel1: [UInt8] = [
         0x03,0x03,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,
         0x0f,0x10,0x00,0x01,0x61,0x89,0x76,0x55,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -39,14 +70,30 @@ enum Libre3Keys {
         0xcb,0xa0,0x62,0x37,0x30,0x14,0xb7,0x78,0x6e,0x44,0x37,0xb1,0x77,0xae,0xc3,0xc8
     ]
 
-    // App Static Private Key Level 1 (32-Byte P-256 Scalar aus Juggluco LIBRE3_APP_PRIVATE_KEYS[1])
-    // Extrahiert aus dem Key-Blob nach dem 0x00000020-Längen-Tag
+    // MARK: - App Static Private Key
+    //
+    // Extracted from Juggluco LIBRE3_APP_PRIVATE_KEYS[1] (the key blob passed to
+    // processint(2) for security level 1).  The blob uses a proprietary Abbott/TEE
+    // format; the 32 bytes below follow the 0x00000020 length tag at offset 93.
+    //
+    // IMPORTANT: these 32 bytes do NOT produce the matching public key from appCertLevel1
+    // when used as a raw P-256 scalar.  The actual private key is either encrypted inside
+    // the blob or stored in a device TEE.  The ECDH value Zs computed from this scalar is
+    // therefore NOT correct.  All KDF variants using only Ze/Ze_c (ephemeral ECDH) are
+    // symmetric and do not depend on this key.
+
+    /// Candidate P-256 scalar extracted from the Juggluco key blob (level 1). See note above.
     static let appStaticPrivKeyLevel1: [UInt8] = [
         0xE3,0xA1,0xFB,0x17,0x80,0xA1,0x63,0x80,0x2A,0xA0,0xFE,0xB1,0xF2,0x00,0xAC,0x26,
         0x9A,0x42,0xB2,0x29,0x03,0x8C,0xA6,0xE1,0x4D,0x40,0xEF,0xBC,0x6B,0x7B,0x6A,0xE8
     ]
 
-    // Patch Signing Keys (für ECDSA-Signatur-Verifikation des Sensor-Zertifikats)
+    // MARK: - Patch Signing Keys
+    //
+    // P-256 public keys used to verify the ECDSA signature on the sensor certificate.
+    // Source: Juggluco ECDHCrypto.java LIBRE3_PATCH_SIGNING_KEYS_B
+
+    /// Patch signing key 0 (uncompressed P-256, 65 bytes, 0x04 prefix).
     static let patchSigningKey0: [UInt8] = [
         0x04,0xB6,0x9D,0x17,0x34,0xF5,0xE4,0x25,0xBC,0xC0,0x57,0x6A,0xD1,0xF7,0x27,0xC1,
         0x31,0x1C,0x90,0xB6,0xEA,0x98,0x6F,0x00,0x6E,0x7E,0x9F,0x90,0x96,0xF6,0xA8,0x28,
@@ -55,6 +102,7 @@ enum Libre3Keys {
         0x80
     ]
 
+    /// Patch signing key 1 (uncompressed P-256, 65 bytes, 0x04 prefix).
     static let patchSigningKey1: [UInt8] = [
         0x04,0xA2,0xD8,0x47,0x89,0x90,0x94,0x5F,0x70,0xA9,0x57,0x0A,0xDE,0x07,0xB1,0x55,
         0xBC,0x90,0x4D,0x2D,0x38,0x06,0x47,0x58,0x7B,0x12,0x39,0x17,0x01,0x30,0x9B,0xD1,
@@ -63,9 +111,14 @@ enum Libre3Keys {
         0x38
     ]
 
-    // GATT UUIDs (Libre 3)
+    // MARK: - GATT Service UUIDs
+
+    /// Primary Libre 3 data service.
     static let serviceData     = "089810CC-EF89-11E9-81B4-2A2AE2DBCCE4"
+    /// Security / authentication service.
     static let serviceSecurity = "0898203A-EF89-11E9-81B4-2A2AE2DBCCE4"
+
+    // MARK: - GATT Characteristic UUIDs
 
     static let charPatchControl     = "08981338-EF89-11E9-81B4-2A2AE2DBCCE4"
     static let charPatchStatus      = "08981482-EF89-11E9-81B4-2A2AE2DBCCE4"
@@ -74,17 +127,25 @@ enum Libre3Keys {
     static let charClinicalData     = "08981AB8-EF89-11E9-81B4-2A2AE2DBCCE4"
     static let charEventLog         = "08981BEE-EF89-11E9-81B4-2A2AE2DBCCE4"
     static let charFactoryData      = "08981D24-EF89-11E9-81B4-2A2AE2DBCCE4"
+    /// Handshake command/status channel.
     static let charCommandResponse  = "08982198-EF89-11E9-81B4-2A2AE2DBCCE4"
+    /// 23-byte and 67-byte challenge channel.
     static let charChallengeData    = "089822CE-EF89-11E9-81B4-2A2AE2DBCCE4"
+    /// Certificate and ephemeral key transfer channel.
     static let charCertificateData  = "089823FA-EF89-11E9-81B4-2A2AE2DBCCE4"
 
-    // Paket-Deskriptoren (aus Juggluco bcrypt.cpp)
+    // MARK: - Packet Descriptors
+    //
+    // 3-byte type tags used as the middle bytes (positions 2–4) of the 13-byte AES-CCM
+    // nonce for encrypted data packets after the handshake.
+    // Source: Juggluco bcrypt.cpp
+
     static let packetDescriptors: [[UInt8]] = [
         [0x00,0x00,0x00],  // 0: Command
         [0x00,0x00,0x0F],  // 1: Patch Control
         [0x00,0x00,0xF0],  // 2: Patch Status
-        [0x00,0x0F,0x00],  // 3: Glucose / One-Minute Reading
-        [0x00,0xF0,0x00],  // 4: Historic Data
+        [0x00,0x0F,0x00],  // 3: One-Minute Reading (glucose)
+        [0x00,0xF0,0x00],  // 4: Historical Data
         [0x0F,0x00,0x00],  // 5: Clinical Data
         [0xF0,0x00,0x00],  // 6: Event Log
         [0x44,0x00,0x00],  // 7: Nonce-Back / Challenge
