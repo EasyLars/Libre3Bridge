@@ -1,7 +1,7 @@
 /*  Libre3Keys.swift
  *  Part of Libre3Bridge – FreeStyle Libre 3 direct BLE connection for iOS
  *
- *  Copyright (C) 2024 Lars Oeljeschläger & Lars
+ *  Copyright (C) 2024 Lars & Lars
  *
  *  Based on Juggluco by Jaap Korthals Altes (GPL-3.0)
  *  <https://github.com/maheitsec/juggluco>

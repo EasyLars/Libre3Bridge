@@ -1,7 +1,7 @@
 /*  Libre3BridgeApp.swift
  *  Part of Libre3Bridge – FreeStyle Libre 3 direct BLE connection for iOS
  *
- *  Copyright (C) 2024 Lars Oeljeschläger & Lars
+ *  Copyright (C) 2024 Lars & Lars
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by

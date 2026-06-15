@@ -2,7 +2,7 @@
 
 An iOS proof-of-concept for reading FreeStyle Libre 3 glucose sensors directly via Bluetooth Low Energy, without the Abbott LibreLink app.
 
-**Authors:** Lars Oeljeschläger & Lars  
+**Authors:** Lars & Lars  
 **Based on:** [Juggluco](https://www.juggluco.nl/) by Jaap Korthals Altes  
 **License:** GPL-3.0 (see below)
 
@@ -154,7 +154,7 @@ This project derives from Juggluco.  Contributions are welcome under GPL-3.0.
 ## License
 
 ```
-Copyright (C) 2024 Lars Oeljeschläger & Lars
+Copyright (C) 2024 Lars & Lars
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
