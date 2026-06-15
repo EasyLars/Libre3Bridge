@@ -90,17 +90,14 @@ The app ephemeral key for this test vector is unknown (generated inside `liblibr
 ## Project Structure
 
 ```
-Libre3Test/
+Libre3Bridge.xcodeproj/
 ├── README.md                    ← this file
-├── SETUP.md                     ← Xcode project setup instructions (legacy)
-└── Libre3Test/
-    └── Libre3Test/
-        └── Libre3Test/
-            ├── Libre3TestApp.swift   ← App entry point
-            ├── ContentView.swift     ← UI (glucose, status, KDF results, log)
-            ├── Libre3Manager.swift   ← CoreBluetooth layer, handshake state machine
-            ├── Libre3Crypto.swift    ← ECDH, KDF variants, AES-CCM, glucose parsing
-            └── Libre3Keys.swift      ← Certificates, keys, UUIDs, packet descriptors
+└── Libre3Bridge/
+    ├── Libre3BridgeApp.swift    ← App entry point
+    ├── ContentView.swift        ← UI (glucose, status, KDF results, log)
+    ├── Libre3Manager.swift      ← CoreBluetooth layer, handshake state machine
+    ├── Libre3Crypto.swift       ← ECDH, KDF variants, AES-CCM, glucose parsing
+    └── Libre3Keys.swift         ← Certificates, keys, UUIDs, packet descriptors
 ```
 
 ---
@@ -115,7 +112,7 @@ Libre3Test/
 
 ### Steps
 
-1. Open `Libre3Test/Libre3Test.xcodeproj` in Xcode
+1. Open `Libre3Bridge.xcodeproj` in Xcode
 2. Set your Team in **Signing & Capabilities**
 3. Add `NSBluetoothAlwaysUsageDescription` to `Info.plist`:  
    `"Required to communicate with FreeStyle Libre 3 sensor"`

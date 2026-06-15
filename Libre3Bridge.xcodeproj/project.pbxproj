@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		E964B5A52FDBF9FB00056EE5 /* Libre3Test.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Libre3Test.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E964B5A52FDBF9FB00056EE5 /* Libre3Bridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Libre3Bridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		E964B5A72FDBF9FB00056EE5 /* Libre3Test */ = {
+		E964B5A72FDBF9FB00056EE5 /* Libre3Bridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Libre3Test;
+			path = Libre3Bridge;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		E964B59C2FDBF9FB00056EE5 = {
 			isa = PBXGroup;
 			children = (
-				E964B5A72FDBF9FB00056EE5 /* Libre3Test */,
+				E964B5A72FDBF9FB00056EE5 /* Libre3Bridge */,
 				E964B5A62FDBF9FB00056EE5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		E964B5A62FDBF9FB00056EE5 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E964B5A52FDBF9FB00056EE5 /* Libre3Test.app */,
+				E964B5A52FDBF9FB00056EE5 /* Libre3Bridge.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E964B5A42FDBF9FB00056EE5 /* Libre3Test */ = {
+		E964B5A42FDBF9FB00056EE5 /* Libre3Bridge */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = E964B5B02FDBF9FC00056EE5 /* Build configuration list for PBXNativeTarget "Libre3Test" */;
+			buildConfigurationList = E964B5B02FDBF9FC00056EE5 /* Build configuration list for PBXNativeTarget "Libre3Bridge" */;
 			buildPhases = (
 				E964B5A12FDBF9FB00056EE5 /* Sources */,
 				E964B5A22FDBF9FB00056EE5 /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				E964B5A72FDBF9FB00056EE5 /* Libre3Test */,
+				E964B5A72FDBF9FB00056EE5 /* Libre3Bridge */,
 			);
-			name = Libre3Test;
+			name = Libre3Bridge;
 			packageProductDependencies = (
 			);
-			productName = Libre3Test;
-			productReference = E964B5A52FDBF9FB00056EE5 /* Libre3Test.app */;
+			productName = Libre3Bridge;
+			productReference = E964B5A52FDBF9FB00056EE5 /* Libre3Bridge.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E964B5A02FDBF9FB00056EE5 /* Build configuration list for PBXProject "Libre3Test" */;
+			buildConfigurationList = E964B5A02FDBF9FB00056EE5 /* Build configuration list for PBXProject "Libre3Bridge" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E964B5A42FDBF9FB00056EE5 /* Libre3Test */,
+				E964B5A42FDBF9FB00056EE5 /* Libre3Bridge */,
 			);
 		};
 /* End PBXProject section */
@@ -252,14 +252,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 26;
 				DEVELOPMENT_TEAM = B94CMNVN82;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Libre 3 Test";
+				INFOPLIST_KEY_CFBundleDisplayName = "Libre 3 Bridge";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Benötigt um den Sensor anzubinden";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Required to connect to the sensor";
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -271,7 +271,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = easyfamily.Libre3Test;
+				PRODUCT_BUNDLE_IDENTIFIER = easylars.Libre3Bridge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -289,14 +289,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 26;
 				DEVELOPMENT_TEAM = B94CMNVN82;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Libre 3 Test";
+				INFOPLIST_KEY_CFBundleDisplayName = "Libre 3 Bridge";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Benötigt um den Sensor anzubinden";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Required to connect to the sensor";
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -308,7 +308,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = easyfamily.Libre3Test;
+				PRODUCT_BUNDLE_IDENTIFIER = easylars.Libre3Bridge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -323,7 +323,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E964B5A02FDBF9FB00056EE5 /* Build configuration list for PBXProject "Libre3Test" */ = {
+		E964B5A02FDBF9FB00056EE5 /* Build configuration list for PBXProject "Libre3Bridge" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E964B5AE2FDBF9FC00056EE5 /* Debug */,
@@ -332,7 +332,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		E964B5B02FDBF9FC00056EE5 /* Build configuration list for PBXNativeTarget "Libre3Test" */ = {
+		E964B5B02FDBF9FC00056EE5 /* Build configuration list for PBXNativeTarget "Libre3Bridge" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E964B5B12FDBF9FC00056EE5 /* Debug */,

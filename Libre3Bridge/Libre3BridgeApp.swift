@@ -1,4 +1,4 @@
-/*  Libre3TestApp.swift
+/*  Libre3BridgeApp.swift
  *  Part of Libre3Bridge – FreeStyle Libre 3 direct BLE connection for iOS
  *
  *  Copyright (C) 2024 Lars Oeljeschläger & Lars
@@ -20,7 +20,7 @@
 import SwiftUI
 
 @main
-struct Libre3TestApp: App {
+struct Libre3BridgeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
