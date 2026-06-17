@@ -465,8 +465,7 @@ final class Tables {
     static func loadData(_ table: RuntimeTable) throws -> Data {
         guard let url = Bundle.main.url(
             forResource: table.rawValue,
-            withExtension: "bin",
-            subdirectory: "RuntimeTables"
+            withExtension: "bin"
         ) else {
             throw CipherFnError.missingResource(table.rawValue)
         }
